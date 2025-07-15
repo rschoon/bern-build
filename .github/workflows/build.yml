@@ -1,0 +1,21 @@
+name: Build
+run-name: build
+on:
+  push:
+  schedule:
+    - cron: '10 10 19 * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+      - name: Lint
+        run: cargo clippy
+      - name: Test
+        run: cargo test
