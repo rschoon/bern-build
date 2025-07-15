@@ -25,6 +25,13 @@ impl Environment {
         }
     }
 
+    pub fn set<V>(&mut self, name: String, value: V)
+    where 
+        V: Into<minijinja::Value>
+    {
+        self.vars.insert(name, value.into());
+    }
+
     pub fn render_to(&self, src: &Path, w: impl Write) -> anyhow::Result<()> {
         let name = src.file_name().unwrap_or_else(|| OsStr::new("<input>")).to_string_lossy();
         let mut f = BufReader::new(fs::File::open(src)
