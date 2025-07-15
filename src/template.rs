@@ -10,8 +10,12 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn new() -> Self {
+    pub fn new<P>(root: P) -> Self
+    where 
+        P: AsRef<Path>,
+    {
         let mut environment = minijinja::Environment::empty();
+        environment.set_loader(minijinja::path_loader(root));
         register_filters(&mut environment);
         register_functions(&mut environment);
         register_tests(&mut environment);

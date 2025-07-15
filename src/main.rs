@@ -16,8 +16,9 @@ struct Cli {
 
 fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
-    
-    let jenv = template::Environment::new();
+    let context_root = ".";
+
+    let jenv = template::Environment::new(context_root);
     let stage_dir = tempfile::tempdir()?;
 
     let df_path: PathBuf = stage_dir.path().join("Dockerfile");
@@ -26,7 +27,7 @@ fn main() -> anyhow::Result<()> {
     jenv.render_to(&args.file, df_file)?;
 
     // TODO: docker_args is probably wrong... eg expected to use --docker-args="--build-arg hello"
-    Command::new("docker").arg("buildx").arg("build").arg("-f").arg(&df_path).args(&args.docker_args).arg(".");
+    Command::new("docker").arg("buildx").arg("build").arg("-f").arg(&df_path).args(&args.docker_args).arg(context_root);
 
     Ok(())
 }
