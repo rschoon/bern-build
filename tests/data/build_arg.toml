@@ -1,0 +1,8 @@
+
+[[run]]
+args = ["--build-arg", "input=sample", "--output", "output"]
+verify_files = { "output/hello.txt".content = "sample" }
+
+[[run]]
+args = ["--output", "output"]
+verify_files = { "output/hello.txt".content = "internal" }

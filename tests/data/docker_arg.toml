@@ -1,0 +1,5 @@
+
+
+[[run]]
+args = ["--docker-args=--build-arg input=sample", "--output", "output"]
+verify_files = { "output/hello.txt".content = "sample" }

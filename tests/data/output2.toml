@@ -1,0 +1,5 @@
+
+[[run]]
+args = []
+verify_files = { "output/hello.txt".content = "hello\n" }
+

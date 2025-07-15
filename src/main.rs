@@ -14,7 +14,14 @@ struct Cli {
     docker_args: Vec<String>,
 
     #[clap(long)]
+    build_arg: Vec<String>,
+
+    #[clap(long)]
     output: Option<PathBuf>,
+}
+
+fn transform_docker_args(args: Vec<String>) -> Vec<String> {
+    args.iter().flat_map(|a| shlex::split(a).unwrap_or_default()).collect()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -25,8 +32,8 @@ fn main() -> anyhow::Result<()> {
         stage_dir: stage_dir.path().to_owned(),
         file: args.file,
         context_root: PathBuf::from("."),
-        // TODO: docker_args is probably wrong... eg expected to use --docker-args="--build-arg hello"
-        docker_args: args.docker_args,
+        docker_args: transform_docker_args(args.docker_args),
+        build_args: args.build_arg,
         output: args.output,
     });
 

@@ -1,0 +1,7 @@
+
+FROM alpine:latest as input
+ARG input=default
+RUN echo -n $input > /hello.txt
+
+FROM scratch
+COPY --from=input /hello.txt /
