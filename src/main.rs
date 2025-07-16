@@ -11,6 +11,9 @@ struct Cli {
     file: PathBuf,
 
     #[clap(long)]
+    debug: bool,
+
+    #[clap(long)]
     docker_args: Vec<String>,
 
     #[clap(long)]
@@ -37,7 +40,11 @@ fn main() -> anyhow::Result<()> {
         output: args.output,
     });
 
-    build.build()?;
+    if args.debug {
+        build.render_to(std::io::stdout())?;
+    } else {
+        build.build()?;
+    }
 
     Ok(())
 }

@@ -84,12 +84,21 @@ impl BernBuild {
         }
     }
 
+    pub fn render_to<W>(&self, writer: W) -> anyhow::Result<()>
+    where
+        W: std::io::Write
+    {
+        self.jenv.render_to(&self.config.file, writer)?;
+
+        Ok(())
+    }
+
     pub fn build(&self) -> anyhow::Result<()> {
         let df_path: PathBuf = self.config.stage_dir.join("Dockerfile");
         let df_file = BufWriter::new(fs::File::create(&df_path).with_context(|| format!("Failed to write file: {}", df_path.display()))?);
 
-        self.jenv.render_to(&self.config.file, df_file)?;
-        
+        self.render_to(df_file)?;
+
         let mut command = Command::new("docker");
         command.arg("buildx")
             .arg("build").arg("-f").arg(&df_path)
