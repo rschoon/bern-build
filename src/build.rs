@@ -1,4 +1,4 @@
-use std::{ffi::OsString, fs, io::BufWriter, path::PathBuf, process::Command, sync::{Arc, Mutex}};
+use std::{ffi::OsString, fs, io::BufWriter, path::{Path, PathBuf}, process::Command, sync::{Arc, LazyLock, Mutex}};
 
 use anyhow::{bail, Context as _};
 use minijinja::{value::Object, Value};
@@ -66,6 +66,22 @@ where
     }
 }
 
+fn docker_cmd() -> Result<&'static Path, anyhow::Error> {
+    static DOCKER_CMD: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
+        let candidates = [
+            std::env::var_os("DOCKER"),
+            Some("docker".into()),
+            Some("podman".into())
+        ];
+
+        candidates.iter()
+            .filter_map(|p| p.as_ref().and_then(|p2| which::which(p2).ok()))
+            .next()
+    });
+
+    DOCKER_CMD.as_deref().ok_or_else(|| anyhow::anyhow!("docker or podman was not found in PATH"))
+}
+
 pub struct BernBuild {
     config: BernConfig,
     runtime: Arc<Runtime>,
@@ -104,7 +120,7 @@ impl BernBuild {
 
         self.render_to(df_file)?;
 
-        let mut command = Command::new("docker");
+        let mut command = Command::new(docker_cmd()?);
         command.arg("buildx")
             .arg("build").arg("-f").arg(&df_path)
             .args(&self.config.docker_args);
@@ -139,7 +155,7 @@ impl BernBuild {
 
     pub fn push(&self) -> anyhow::Result<()> {
         if let Some(docker_tag) = self.docker_tag() {
-            let mut command = Command::new("docker");
+            let mut command = Command::new(docker_cmd()?);
             command.arg("push").arg(docker_tag);
 
             let status = command.status()?;
