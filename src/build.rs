@@ -11,6 +11,7 @@ pub struct BernConfig {
     pub file: PathBuf,
     pub context_root: PathBuf,
     pub docker_args: Vec<String>,
+    pub docker_tag: Option<String>,
     pub build_args: Vec<String>,
     pub output: Option<PathBuf>,
 }
@@ -84,6 +85,10 @@ impl BernBuild {
         }
     }
 
+    fn docker_tag(&self) -> Option<&str> {
+        self.config.docker_tag.as_deref()
+    }
+
     pub fn render_to<W>(&self, writer: W) -> anyhow::Result<()>
     where
         W: std::io::Write
@@ -118,6 +123,10 @@ impl BernBuild {
             command.arg("--output").arg(output_arg);
         }
 
+        if let Some(docker_tag) = self.docker_tag() {
+            command.arg("-t").arg(docker_tag);
+        }
+
         command.arg(&self.config.context_root);
         let status = command.status()?;
 
@@ -126,5 +135,21 @@ impl BernBuild {
         }
 
         Ok(())
+    }
+
+    pub fn push(&self) -> anyhow::Result<()> {
+        if let Some(docker_tag) = self.docker_tag() {
+            let mut command = Command::new("docker");
+            command.arg("push").arg(docker_tag);
+
+            let status = command.status()?;
+            if !status.success() {
+                bail!("Tag push failed with {status}")
+            }
+
+            Ok(())
+        } else {
+            bail!("Tag not set");
+        }
     }
 }

@@ -20,6 +20,12 @@ struct Cli {
     build_arg: Vec<String>,
 
     #[clap(long)]
+    push: bool,
+
+    #[clap(long, short)]
+    tag: Option<String>,
+
+    #[clap(long)]
     output: Option<PathBuf>,
 }
 
@@ -36,14 +42,21 @@ fn main() -> anyhow::Result<()> {
         file: args.file,
         context_root: PathBuf::from("."),
         docker_args: transform_docker_args(args.docker_args),
+        docker_tag: args.tag,
         build_args: args.build_arg,
         output: args.output,
     });
 
     if args.debug {
         build.render_to(std::io::stdout())?;
-    } else {
-        build.build()?;
+
+        return Ok(())
+    }
+
+    build.build()?;
+
+    if args.push {
+        build.push()?;
     }
 
     Ok(())
