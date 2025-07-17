@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.98"
-clap = { version = "4.5.40", features = ["derive", "env"] }
+clap = { version = "4.5.40", features = ["derive", "env", "cargo"] }
 fastrand = "2.3.0"
 itertools = "0.14.0"
 minijinja = { version = "2.11.0", features = ["json", "loader"] }

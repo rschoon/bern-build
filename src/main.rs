@@ -6,6 +6,7 @@ mod build;
 mod template;
 
 #[derive(Clone, Debug, Parser)]
+#[clap(version)]
 struct Cli {
     #[clap(long, short, default_value = "Dockerfile.j2")]
     file: PathBuf,
