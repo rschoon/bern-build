@@ -1,7 +1,7 @@
 
 {% do bern.set_build_arg("input", "internal") %}
 
-FROM alpine:latest as input
+FROM docker.io/library/alpine:latest as input
 ARG input=default
 RUN echo -n $input > /hello.txt
 

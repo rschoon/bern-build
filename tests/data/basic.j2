@@ -1,5 +1,5 @@
 
-FROM alpine:latest as input
+FROM docker.io/library/alpine:latest as input
 RUN echo hello > /hello.txt
 
 FROM scratch
