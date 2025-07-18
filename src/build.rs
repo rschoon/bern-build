@@ -11,7 +11,7 @@ pub struct BernConfig {
     pub file: PathBuf,
     pub context_root: PathBuf,
     pub docker_args: Vec<String>,
-    pub docker_tag: Option<String>,
+    pub docker_tags: Vec<String>,
     pub build_args: Vec<String>,
     pub output: Option<PathBuf>,
 }
@@ -20,6 +20,7 @@ pub struct BernConfig {
 struct RuntimeInner {
     output: Option<PathBuf>,
     build_args: Vec<String>,
+    docker_tags: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -33,6 +34,11 @@ impl Runtime {
 
     fn set_output(&self, output: Option<PathBuf>) {
         self.0.lock().unwrap().output = output;
+    }
+
+    fn add_docker_tag(&self, tag: &str) -> anyhow::Result<()> {
+        self.0.lock().unwrap().docker_tags.push(tag.to_owned());
+        Ok(())
     }
 }
 
@@ -48,6 +54,8 @@ impl Object for Runtime {
             Value::from_function(move |s: Option<&str>| this.set_output(s.map(PathBuf::from)))
         } else if method == "set_build_arg" {
             Value::from_function(move |k: &str, v: &str| mj_res(this.set_build_arg(k, v)))
+        } else if method == "add_docker_tag" {
+            Value::from_function(move |t: &str| mj_res(this.add_docker_tag(t)))
         } else {
             return Err(minijinja::Error::from(minijinja::ErrorKind::UnknownMethod))
         };
@@ -101,8 +109,19 @@ impl BernBuild {
         }
     }
 
-    fn docker_tag(&self) -> Option<&str> {
-        self.config.docker_tag.as_deref()
+    fn build_args(&self) -> Vec<String> {
+        let rt = self.runtime.0.lock().unwrap();
+        rt.build_args.iter().chain(self.config.build_args.iter()).cloned().collect()
+    }
+
+    fn docker_tags(&self) -> Vec<String> {
+        let rt = self.runtime.0.lock().unwrap();
+        self.config.docker_tags.iter().chain(rt.docker_tags.iter()).cloned().collect()
+    }
+
+    fn output(&self) -> Option<PathBuf> {
+        let rt = self.runtime.0.lock().unwrap();
+        self.config.output.clone().or_else(|| rt.output.clone())
     }
 
     pub fn render_to<W>(&self, writer: W) -> anyhow::Result<()>
@@ -125,21 +144,20 @@ impl BernBuild {
             .arg("build").arg("-f").arg(&df_path)
             .args(&self.config.docker_args);
 
-        let runtime = self.runtime.0.lock().unwrap();
-
-        for build_arg in runtime.build_args.iter().chain(self.config.build_args.iter()) {
+        for build_arg in self.build_args() {
             command.arg("--build-arg").arg(build_arg);
         }
 
-        let output = self.config.output.clone().or_else(|| runtime.output.clone());
-        if let Some(output) = output {
+        if let Some(output) = self.output() {
             let mut output_arg = OsString::from("type=local,dest=");
             output_arg.push(output.as_os_str());
 
             command.arg("--output").arg(output_arg);
         }
 
-        if let Some(docker_tag) = self.docker_tag() {
+        let mut docker_tags = self.docker_tags().into_iter();
+        let first_docker_tag = docker_tags.next();
+        if let Some(docker_tag) = first_docker_tag.as_deref() {
             command.arg("-t").arg(docker_tag);
         }
 
@@ -150,22 +168,33 @@ impl BernBuild {
             bail!("Build failed with {status}")
         }
 
+        for tag in docker_tags {
+            Command::new(docker_cmd()?)
+                .arg("tag")
+                .arg(first_docker_tag.as_ref().unwrap())
+                .arg(&tag)
+                .spawn()?;
+        }
+
         Ok(())
     }
 
     pub fn push(&self) -> anyhow::Result<()> {
-        if let Some(docker_tag) = self.docker_tag() {
-            let mut command = Command::new(docker_cmd()?);
-            command.arg("push").arg(docker_tag);
+        let docker_tags = self.docker_tags();
+        if docker_tags.is_empty() {
+            bail!("Tag not set");
+        } else {
+            for tag in docker_tags {
+                let mut command = Command::new(docker_cmd()?);
+                command.arg("push").arg(&tag);
 
-            let status = command.status()?;
-            if !status.success() {
-                bail!("Tag push failed with {status}")
+                let status = command.status()?;
+                if !status.success() {
+                    bail!("Tag push for {tag} failed with {status}")
+                }
             }
 
             Ok(())
-        } else {
-            bail!("Tag not set");
         }
     }
 }

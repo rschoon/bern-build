@@ -24,7 +24,7 @@ struct Cli {
     push: bool,
 
     #[clap(long, short)]
-    tag: Option<String>,
+    tag: Vec<String>,
 
     #[clap(long)]
     output: Option<PathBuf>,
@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
         file: args.file,
         context_root: PathBuf::from("."),
         docker_args: transform_docker_args(args.docker_args),
-        docker_tag: args.tag,
+        docker_tags: args.tag,
         build_args: args.build_arg,
         output: args.output,
     });
