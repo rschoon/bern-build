@@ -16,6 +16,7 @@ impl Environment {
     {
         let mut environment = minijinja::Environment::empty();
         environment.set_loader(minijinja::path_loader(root));
+        environment.set_undefined_behavior(minijinja::UndefinedBehavior::SemiStrict);
         register_filters(&mut environment);
         register_functions(&mut environment);
         register_tests(&mut environment);
