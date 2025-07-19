@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+use std::{fs, io::{self, BufWriter}, path::PathBuf};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 mod build;
 mod template;
@@ -10,9 +10,6 @@ mod template;
 struct Cli {
     #[clap(long, short, default_value = "Dockerfile.j2")]
     file: PathBuf,
-
-    #[clap(long)]
-    debug: bool,
 
     #[clap(long)]
     docker_args: Vec<String>,
@@ -28,6 +25,17 @@ struct Cli {
 
     #[clap(long)]
     output: Option<PathBuf>,
+
+    #[clap(subcommand)]
+    command: Option<BernCommand>,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+enum BernCommand {
+    ShowDockerfile,
+    ExportContext {
+        destination: PathBuf,
+    }
 }
 
 fn transform_docker_args(args: Vec<String>) -> Vec<String> {
@@ -48,17 +56,30 @@ fn main() -> anyhow::Result<()> {
         output: args.output,
     });
 
-    if args.debug {
-        build.render_to(std::io::stdout())?;
+    match args.command {
+        Some(BernCommand::ShowDockerfile) => {
+            build.render_to(std::io::stdout())?;
+            Ok(())
+        },
+        Some(BernCommand::ExportContext { destination }) => {
+            let output: Box<dyn io::Write> = if destination.as_os_str() == "-" {
+                Box::new(std::io::stdout())
+            } else {
+                Box::new(BufWriter::new(fs::File::create(destination)?))
+            };
 
-        return Ok(())
+            build.export_context(output)?;
+
+            Ok(())
+        },
+        None => {
+            build.build()?;
+
+            if args.push {
+                build.push()?;
+            }
+
+            Ok(())
+        },
     }
-
-    build.build()?;
-
-    if args.push {
-        build.push()?;
-    }
-
-    Ok(())
 }

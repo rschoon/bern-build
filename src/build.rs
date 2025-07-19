@@ -1,4 +1,4 @@
-use std::{ffi::OsString, fs, io::BufWriter, path::{Path, PathBuf}, process::Command, sync::{Arc, LazyLock, Mutex}};
+use std::{ffi::OsString, fs, io::{self, BufRead, BufWriter}, path::{Path, PathBuf}, process::Command, sync::{Arc, LazyLock, Mutex}};
 
 use anyhow::{bail, Context as _};
 use minijinja::{value::Object, Value};
@@ -196,5 +196,49 @@ impl BernBuild {
 
             Ok(())
         }
+    }
+
+    fn read_dockerignore(&self) -> Vec<glob::Pattern> {
+        let Ok(f) = fs::File::open(self.config.context_root.join(".dockerignore")) else { return Vec::new() };
+
+        io::BufReader::new(f).lines()
+            .map_while(|a| a.ok())
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.starts_with("#") && !a.is_empty())
+            .filter_map(|a| glob::Pattern::new(&a).ok())
+            .collect()
+    }
+
+    pub fn export_context(&self, w: impl io::Write) -> anyhow::Result<()> {
+        let globs = self.read_dockerignore();
+
+        let mut tar = tar::Builder::new(w);
+
+        let mut dockerfile = Vec::new();
+        self.render_to(io::Cursor::new(&mut dockerfile))
+            .with_context(|| anyhow::anyhow!("Failed to render dockerfile"))?;
+
+        let mut header = tar::Header::new_gnu();
+        header.set_path("Dockerfile")?;
+        header.set_size(dockerfile.len() as u64);
+        header.set_cksum();
+
+        tar.append(&header, &dockerfile as &[u8])
+            .with_context(|| anyhow::anyhow!("Failed to write dockerfile to tar"))?;
+
+        for entry in walkdir::WalkDir::new(&self.config.context_root) {
+            let entry = entry?;
+            let path = entry.path();
+            if globs.iter().any(|g| g.matches_path(path)) {
+                continue;
+            }
+            
+            tar.append_path(path)
+                .with_context(|| anyhow::anyhow!("Failed to write {} to tar", path.display()))?;
+        }
+
+        tar.finish()?;
+
+        Ok(())
     }
 }
