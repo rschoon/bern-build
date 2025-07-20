@@ -14,7 +14,7 @@ struct Cli {
     #[clap(long)]
     docker_args: Vec<String>,
 
-    #[clap(long)]
+    #[clap(long, short('b'))]
     build_arg: Vec<String>,
 
     #[clap(long)]
