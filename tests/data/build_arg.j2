@@ -4,6 +4,8 @@
 FROM docker.io/library/alpine:latest as input
 ARG input=default
 RUN echo -n $input > /hello.txt
+RUN echo -n {{ bern.build_arg("input") }} > /hello2.txt
 
 FROM scratch
 COPY --from=input /hello.txt /
+COPY --from=input /hello2.txt /

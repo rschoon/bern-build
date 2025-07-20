@@ -46,13 +46,22 @@ fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
 
     let stage_dir = tempfile::tempdir()?;
+    let build_args = args.build_arg.into_iter()
+        .map(|a| {
+            match a.split_once('=') {
+                Some((k, v)) => (k.to_owned(), v.to_owned()),
+                None => (a, String::new())
+            }
+        
+        })
+        .collect();
     let build = build::BernBuild::new(build::BernConfig {
         stage_dir: stage_dir.path().to_owned(),
         file: args.file,
         context_root: PathBuf::from("."),
         docker_args: transform_docker_args(args.docker_args),
         docker_tags: args.tag,
-        build_args: args.build_arg,
+        build_args,
         output: args.output,
     });
 

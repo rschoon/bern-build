@@ -1,4 +1,4 @@
-use std::{ffi::OsString, fs, io::{self, BufRead, BufWriter}, path::{Path, PathBuf}, process::Command, sync::{Arc, LazyLock, Mutex}};
+use std::{collections::HashMap, ffi::OsString, fs, io::{self, BufRead, BufWriter}, path::{Path, PathBuf}, process::Command, sync::{Arc, LazyLock, Mutex}};
 
 use anyhow::{bail, Context as _};
 use minijinja::{value::Object, Value};
@@ -12,14 +12,15 @@ pub struct BernConfig {
     pub context_root: PathBuf,
     pub docker_args: Vec<String>,
     pub docker_tags: Vec<String>,
-    pub build_args: Vec<String>,
+    pub build_args: HashMap<String, String>,
     pub output: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
 struct RuntimeInner {
+    config: Arc<BernConfig>,
     output: Option<PathBuf>,
-    build_args: Vec<String>,
+    build_args: HashMap<String, String>,
     docker_tags: Vec<String>,
 }
 
@@ -28,8 +29,17 @@ struct Runtime(Mutex<RuntimeInner>);
 
 impl Runtime {
     fn set_build_arg(&self, name: &str, value: &str) -> anyhow::Result<()> {
-        self.0.lock().unwrap().build_args.push(format!("{name}={value}"));
+        self.0.lock().unwrap().build_args.insert(name.to_owned(), value.to_owned());
         Ok(())
+    }
+
+    fn build_arg(&self, name: &str) -> Option<String> {
+        let inner = self.0.lock().unwrap();
+        if let Some(outer) = inner.config.build_args.get(name) {
+            Some(outer.to_owned())
+        } else {
+            inner.build_args.get(name).cloned()
+        }
     }
 
     fn set_output(&self, output: Option<PathBuf>) {
@@ -54,6 +64,8 @@ impl Object for Runtime {
             Value::from_function(move |s: Option<&str>| this.set_output(s.map(PathBuf::from)))
         } else if method == "set_build_arg" {
             Value::from_function(move |k: &str, v: &str| mj_res(this.set_build_arg(k, v)))
+        } else if method == "build_arg" {
+            Value::from_function(move |k: &str| this.build_arg(k))
         } else if method == "add_docker_tag" {
             Value::from_function(move |t: &str| mj_res(this.add_docker_tag(t)))
         } else {
@@ -91,14 +103,17 @@ fn docker_cmd() -> Result<&'static Path, anyhow::Error> {
 }
 
 pub struct BernBuild {
-    config: BernConfig,
+    config: Arc<BernConfig>,
     runtime: Arc<Runtime>,
     jenv: template::Environment,
 }
 
 impl BernBuild {
     pub fn new(config: BernConfig) -> Self {
+        let config = Arc::new(config);
         let runtime = Arc::new(Runtime::default());
+        runtime.0.lock().unwrap().config = config.clone();
+
         let mut jenv = template::Environment::new(&config.context_root);
         jenv.set("bern".to_owned(), minijinja::Value::from_dyn_object(runtime.clone()));
 
@@ -111,7 +126,7 @@ impl BernBuild {
 
     fn build_args(&self) -> Vec<String> {
         let rt = self.runtime.0.lock().unwrap();
-        rt.build_args.iter().chain(self.config.build_args.iter()).cloned().collect()
+        rt.build_args.iter().chain(self.config.build_args.iter()).map(|(k,v)| format!("{k}={v}")).collect()
     }
 
     fn docker_tags(&self) -> Vec<String> {
