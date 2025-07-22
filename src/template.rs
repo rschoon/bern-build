@@ -1,7 +1,8 @@
 
-use std::{collections::HashMap, ffi::OsStr, fs, io::{BufReader, Read, Write}, path::Path};
+use std::{collections::HashMap, ffi::OsStr, fmt::{self, Display as _}, fs, io::{BufReader, Read, Write}, path::Path, sync::Arc};
 
 use anyhow::Context as _;
+use minijinja::{value::Object, Value};
 
 #[derive(Debug)]
 pub struct Environment {
@@ -46,6 +47,54 @@ impl Environment {
         tpl.render_to_write(&self.vars, w)?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct DateTime(chrono::DateTime<chrono::Local>);
+
+impl DateTime {
+    pub fn now() -> Self {
+        Self(chrono::Local::now())
+    }
+
+    pub fn format(&self, format: &str) -> String {
+        self.0.format(format).to_string()
+    }
+
+    pub fn timestamp(&self) -> i64 {
+        self.0.timestamp()
+    }
+}
+
+impl Object for DateTime {
+    fn call_method(
+        self: &Arc<Self>,
+        state: &minijinja::State<'_, '_>,
+        method: &str,
+        args: &[Value],
+    ) -> Result<Value, minijinja::Error> {
+        let this = self.clone();
+        let method = if method == "format" {
+            if args.is_empty() {
+                Value::from_function(move || this.format("%+"))
+            } else {
+                Value::from_function(move |s: &str| this.format(s))
+            }
+        } else if method == "timestamp" {
+            Value::from_function(move || this.timestamp())
+        } else {
+            return Err(minijinja::Error::from(minijinja::ErrorKind::UnknownMethod))
+        };
+
+        method.call(state, args)
+    }
+
+    fn render(self: &Arc<Self>, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    where
+        Self: Sized + 'static,
+    {
+        self.0.fmt(f)
     }
 }
 
@@ -99,6 +148,7 @@ fn register_functions(env: &mut minijinja::Environment) {
     env.add_function("dict", dict);
     env.add_function("namespace", namespace);
     env.add_function("range", range);
+    env.add_function("now", || Value::from_object(DateTime::now()));
 }
 
 fn register_tests(env: &mut minijinja::Environment) {
