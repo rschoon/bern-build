@@ -1,0 +1,15 @@
+
+FROM docker.io/library/alpine:latest as t1-build
+RUN echo -n a > /hello.txt
+
+FROM scratch as t1
+COPY --from=t1-build /hello.txt /
+
+FROM docker.io/library/alpine:latest as t2-build
+RUN echo -n b > /hello.txt
+RUN echo -n c > /hello2.txt
+
+FROM scratch as t2
+COPY --from=t2-build /hello.txt /
+COPY --from=t2-build /hello2.txt /
+

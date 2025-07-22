@@ -20,8 +20,11 @@ struct Cli {
     #[clap(long)]
     push: bool,
 
-    #[clap(long, short)]
+    #[clap(long, short('t'))]
     tag: Vec<String>,
+
+    #[clap(long, short('T'))]
+    target: Vec<String>,
 
     #[clap(long)]
     output: Option<PathBuf>,
@@ -62,6 +65,7 @@ fn main() -> anyhow::Result<()> {
         docker_args: transform_docker_args(args.docker_args),
         docker_tags: args.tag,
         build_args,
+        targets: args.target,
         output: args.output,
     });
 

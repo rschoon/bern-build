@@ -13,6 +13,7 @@ pub struct BernConfig {
     pub docker_args: Vec<String>,
     pub docker_tags: Vec<String>,
     pub build_args: HashMap<String, String>,
+    pub targets: Vec<String>,
     pub output: Option<PathBuf>,
 }
 
@@ -108,6 +109,11 @@ pub struct BernBuild {
     jenv: template::Environment,
 }
 
+struct BuildTarget<'s> {
+    name: Option<&'s str>,
+    last: bool,
+}
+
 impl BernBuild {
     pub fn new(config: BernConfig) -> Self {
         let config = Arc::new(config);
@@ -148,39 +154,69 @@ impl BernBuild {
         Ok(())
     }
 
+    fn build_targets(&self) -> impl Iterator<Item=BuildTarget<'_>> {
+        use itertools::Either;
+
+        if self.config.targets.is_empty() {
+            Either::Left([BuildTarget {
+                name: None,
+                last: true,
+            }; 1].into_iter())
+        } else {
+            let count = self.config.targets.len();
+            Either::Right(
+                self.config.targets.iter().enumerate().map(move |t| {
+                    BuildTarget {
+                        name: Some(t.1),
+                        last: t.0 == count - 1
+                    }
+                })
+            )
+        }
+    }
+
     pub fn build(&self) -> anyhow::Result<()> {
         let df_path: PathBuf = self.config.stage_dir.join("Dockerfile");
         let df_file = BufWriter::new(fs::File::create(&df_path).with_context(|| format!("Failed to write file: {}", df_path.display()))?);
 
         self.render_to(df_file)?;
 
-        let mut command = Command::new(docker_cmd()?);
-        command.arg("buildx")
-            .arg("build").arg("-f").arg(&df_path)
-            .args(&self.config.docker_args);
-
-        for build_arg in self.build_args() {
-            command.arg("--build-arg").arg(build_arg);
-        }
-
-        if let Some(output) = self.output() {
-            let mut output_arg = OsString::from("type=local,dest=");
-            output_arg.push(output.as_os_str());
-
-            command.arg("--output").arg(output_arg);
-        }
-
         let mut docker_tags = self.docker_tags().into_iter();
         let first_docker_tag = docker_tags.next();
-        if let Some(docker_tag) = first_docker_tag.as_deref() {
-            command.arg("-t").arg(docker_tag);
-        }
 
-        command.arg(&self.config.context_root);
-        let status = command.status()?;
+        for target in self.build_targets() {
+            let mut command = Command::new(docker_cmd()?);
+            command.arg("buildx")
+                .arg("build").arg("-f").arg(&df_path)
+                .args(&self.config.docker_args);
 
-        if !status.success() {
-            bail!("Build failed with {status}")
+            for build_arg in self.build_args() {
+                command.arg("--build-arg").arg(build_arg);
+            }
+
+            if let Some(output) = self.output() {
+                let mut output_arg = OsString::from("type=local,dest=");
+                output_arg.push(output.as_os_str());
+
+                command.arg("--output").arg(output_arg);
+            }
+
+            if let Some(name) = target.name {
+                command.arg("--target").arg(name);
+            }
+
+            if target.last {
+                if let Some(docker_tag) = first_docker_tag.as_deref() {
+                    command.arg("-t").arg(docker_tag);
+                }
+            }
+
+            command.arg(&self.config.context_root);
+            let status = command.status()?;
+
+            if !status.success() {
+                bail!("Build failed with {status}")
+            }
         }
 
         for tag in docker_tags {
