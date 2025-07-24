@@ -175,6 +175,20 @@ impl BernBuild {
         }
     }
 
+    pub fn docker_build_cmd(&self) -> anyhow::Result<Command> {
+        let mut cmd = Command::new(docker_cmd()?);
+
+        if std::env::var("BERN_BUILDX_DEBUG").map(|t| t == "1").unwrap_or_default() {
+            // This is still experimental functionality
+            cmd.arg("buildx").arg("debug").arg("--on").arg("error").arg("build");
+            cmd.env("BUILDX_EXPERIMENTAL", "1");
+        } else {
+            cmd.arg("buildx").arg("build");
+        }
+
+        Ok(cmd)
+    }
+
     pub fn build(&self) -> anyhow::Result<()> {
         let df_path: PathBuf = self.config.stage_dir.join("Dockerfile");
         let df_file = BufWriter::new(fs::File::create(&df_path).with_context(|| format!("Failed to write file: {}", df_path.display()))?);
@@ -185,9 +199,8 @@ impl BernBuild {
         let first_docker_tag = docker_tags.next();
 
         for target in self.build_targets() {
-            let mut command = Command::new(docker_cmd()?);
-            command.arg("buildx")
-                .arg("build").arg("-f").arg(&df_path)
+            let mut command = self.docker_build_cmd()?;
+            command.arg("-f").arg(&df_path)
                 .args(&self.config.docker_args);
 
             for build_arg in self.build_args() {
