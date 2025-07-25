@@ -2,6 +2,11 @@
 name = "bern-build"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/rschoon/bern-build"
+description = "Templating for docker as a build tool"
+keywords = ["cli", "docker"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "bern"
