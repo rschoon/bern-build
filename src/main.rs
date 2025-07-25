@@ -23,7 +23,7 @@ struct Cli {
     #[clap(long, short('t'))]
     tag: Vec<String>,
 
-    #[clap(long, short('T'))]
+    #[clap(long)]
     target: Vec<String>,
 
     #[clap(long)]
