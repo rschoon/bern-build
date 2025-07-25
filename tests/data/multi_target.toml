@@ -1,14 +1,14 @@
 
 [[run]]
-args = ["--build-arg", "input=sample", "-T", "t1", "--output", "output"]
+args = ["--build-arg", "input=sample", "--target", "t1", "--output", "output"]
 verify_files = { "output/hello.txt".content = "a" }
 
 [[run]]
-args = ["--build-arg", "input=sample", "-T", "t2", "--output", "output"]
+args = ["--build-arg", "input=sample", "--target", "t2", "--output", "output"]
 verify_files = { "output/hello.txt".content = "b" }
 
 [[run]]
-args = ["--build-arg", "input=sample", "-T", "t2", "-T", "t1", "--output", "output"]
+args = ["--build-arg", "input=sample", "--target", "t2", "--target", "t1", "--output", "output"]
 verify_files = { "output/hello.txt".content = "a", "output/hello2.txt".content = "c" }
 
 [[run]]
