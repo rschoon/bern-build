@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ffi::OsString, fs, io::{self, BufRead, BufWriter}, path::{Path, PathBuf}, process::Command, sync::{Arc, LazyLock, Mutex}};
 
-use anyhow::{bail, Context as _};
+use anyhow::{anyhow, bail, Context as _};
 use minijinja::{value::Object, Value};
 
 use crate::template;
@@ -51,6 +51,22 @@ impl Runtime {
         self.0.lock().unwrap().docker_tags.push(tag.to_owned());
         Ok(())
     }
+
+    fn version_require(&self, version: &str) -> anyhow::Result<()> {
+        let req = semver::VersionReq::parse(version)?;
+        let mut current = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
+        
+        let mut matches = req.matches(&current);
+        if !matches {
+            // Allow prerelease matching
+            current.pre = semver::Prerelease::EMPTY;
+            matches = req.matches(&current);
+        }
+
+        matches.then_some(()).ok_or_else(||
+            anyhow!("Current version {current} does not match requested {req}")
+        )
+    }
 }
 
 impl Object for Runtime {
@@ -69,6 +85,8 @@ impl Object for Runtime {
             Value::from_function(move |k: &str| this.build_arg(k))
         } else if method == "add_docker_tag" {
             Value::from_function(move |t: &str| mj_res(this.add_docker_tag(t)))
+        } else if method == "version_require" {
+            Value::from_function(move |v: &str| mj_res(this.version_require(v)))
         } else {
             return Err(minijinja::Error::from(minijinja::ErrorKind::UnknownMethod))
         };
