@@ -8,24 +8,31 @@ mod template;
 #[derive(Clone, Debug, Parser)]
 #[clap(version)]
 struct Cli {
+    /// Docker template file
     #[clap(long, short, default_value = "Dockerfile.j2")]
     file: PathBuf,
 
+    /// Additional docker arguments (multiple)
     #[clap(long)]
     docker_args: Vec<String>,
 
+    /// Build arguments (multiple)
     #[clap(long, short('b'))]
     build_arg: Vec<String>,
 
+    /// Push resulting docker image
     #[clap(long)]
     push: bool,
 
+    /// Tag resulting docker image (multiple)
     #[clap(long, short('t'))]
     tag: Vec<String>,
 
+    /// Targets to build (multiple)
     #[clap(long)]
     target: Vec<String>,
 
+    /// Output path to export contents of final target
     #[clap(long)]
     output: Option<PathBuf>,
 
@@ -35,7 +42,9 @@ struct Cli {
 
 #[derive(Clone, Debug, Subcommand)]
 enum BernCommand {
+    /// Print out resulting Dockerfile
     ShowDockerfile,
+    /// Export context as a tar without building
     ExportContext {
         destination: PathBuf,
     }
