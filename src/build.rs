@@ -1,9 +1,9 @@
-use std::{collections::HashMap, ffi::OsString, fs, io::{self, BufRead, BufWriter}, path::{Path, PathBuf}, process::Command, sync::{Arc, LazyLock, Mutex}};
+use std::{collections::HashMap, ffi::OsString, fmt, fs, io::{self, BufRead, BufWriter}, path::{Path, PathBuf}, process::Command, sync::{Arc, LazyLock, Mutex}};
 
 use anyhow::{anyhow, bail, Context as _};
 use minijinja::{value::Object, Value};
 
-use crate::template;
+use crate::{dockerfile::{DockerFileInstruction, DockerFileParser}, template};
 
 #[derive(Default, Debug, Clone)]
 pub struct BernConfig {
@@ -19,6 +19,7 @@ pub struct BernConfig {
 
 #[derive(Debug, Default)]
 struct RuntimeInner {
+    target: Option<Arc<Target>>,
     config: Arc<BernConfig>,
     output: Option<PathBuf>,
     build_args: HashMap<String, String>,
@@ -95,6 +96,57 @@ impl Object for Runtime {
     }
 }
 
+#[derive(Debug)]
+struct Target {
+    name: Option<String>,
+}
+
+impl Object for Target {
+    fn render(self: &Arc<Self>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(name) = &self.name {
+            write!(f, "[{name}]")
+        } else {
+            f.write_str("[_]")
+        }
+        
+    }
+
+    fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
+        let key = key.as_str()?;
+        if key == "name" {
+            Some(Value::from_safe_string(self.name.clone()?))
+        } else {
+            None
+        }
+    }
+}
+
+
+#[derive(Debug)]
+struct CurrentTarget(Arc<Runtime>);
+
+impl CurrentTarget {
+    fn get(&self) -> anyhow::Result<Arc<Target>> {
+        let inner = self.0.0.lock().map_err(|_| anyhow!("Internal lock error"))?;
+        let target = inner.target.clone().ok_or_else(|| anyhow!("No target"))?;
+        Ok(target)
+    } 
+}
+
+impl Object for CurrentTarget {
+    fn render(self: &Arc<Self>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Ok(target) = self.get() {
+            target.render(f)
+        } else {
+            write!(f, "<target>")
+        }
+    }
+
+    fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
+        self.get().ok()?.get_value(key)
+    }
+}
+
 fn mj_res<I>(result: anyhow::Result<I>) -> Result<Value, minijinja::Error>
 where 
     I: Into<Value>
@@ -102,6 +154,33 @@ where
     match result {
         Ok(v) => Ok(v.into()),
         Err(e) => Err(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+    }
+}
+
+struct RuntimeWriteLayer<W> {
+    runtime: Arc<Runtime>,
+    parser: DockerFileParser,
+    writer: W,
+}
+
+impl<W> io::Write for RuntimeWriteLayer<W>
+where 
+    W: io::Write
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        for item in self.parser.push(buf) {
+            if let DockerFileInstruction::From { src: _, name } = item {
+                let mut lock = self.runtime.0.lock().unwrap();
+                lock.target = Some(Arc::new(Target {
+                    name
+                }))
+            }
+        }
+        self.writer.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
     }
 }
 
@@ -140,6 +219,7 @@ impl BernBuild {
 
         let mut jenv = template::Environment::new(&config.context_root);
         jenv.set("bern".to_owned(), minijinja::Value::from_dyn_object(runtime.clone()));
+        jenv.set("target".to_owned(), minijinja::Value::from_dyn_object(Arc::new(CurrentTarget(runtime.clone()))));
 
         Self {
             config,
@@ -167,7 +247,13 @@ impl BernBuild {
     where
         W: std::io::Write
     {
-        self.jenv.render_to(&self.config.file, writer)?;
+        let rt_writer = RuntimeWriteLayer {
+            runtime: self.runtime.clone(),
+            parser: DockerFileParser::new(),
+            writer,
+        };
+
+        self.jenv.render_to(&self.config.file, rt_writer)?;
 
         Ok(())
     }

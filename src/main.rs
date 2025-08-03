@@ -3,6 +3,7 @@ use std::{fs, io::{self, BufWriter}, path::PathBuf};
 use clap::{Parser, Subcommand};
 
 mod build;
+mod dockerfile;
 mod template;
 
 #[derive(Clone, Debug, Parser)]
