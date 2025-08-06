@@ -1,8 +1,8 @@
-use std::io::BufRead;
+use std::{io::BufRead};
 
 use circular_buffer::CircularBuffer;
 use winnow::{
-    ascii::{newline, till_line_ending, Caseless}, combinator::{alt, delimited, opt, repeat, seq}, error::{ContextError, ErrMode, ParserError}, prelude::*, stream::Offset as _, token::{take_till, take_while}, Partial
+    ascii::{newline, till_line_ending, Caseless}, combinator::{alt, delimited, eof, opt, repeat, seq, terminated, trace}, error::{ContextError, ErrMode, ParserError}, prelude::*, stream::Offset as _, token::{rest, take_till, take_while}, Partial
 };
 
 pub struct DockerFileParser {
@@ -10,8 +10,9 @@ pub struct DockerFileParser {
 }
 
 type Stream<'i> = Partial<&'i [u8]>;
+type StreamSlice<'i> = <Stream<'i> as winnow::stream::Stream>::Slice;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum DockerFileInstruction {
     From {
@@ -24,22 +25,22 @@ pub enum DockerFileInstruction {
 
 fn dockerfile_instructions<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<Option<DockerFileInstruction>, E> {
     alt((
-        delimited(ws, single_instruction, comment_line_end).map(Some),
+        delimited(ws(0..), single_instruction, comment_line_end).map(Some),
         comment_line_end.value(None),
         strange_line.map(Some),
     )).parse_next(input)
 }
 
 fn single_instruction<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<DockerFileInstruction, E> {
-    alt((
+    trace("single_instruction", alt((
         from_instruction,
         other_instruction,
-    )).parse_next(input)
+    ))).parse_next(input)
 }
 
 fn from_instruction<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<DockerFileInstruction, E> {
-    let mut from_as = opt(seq!(_: ws, _: Caseless("as"), _: ws, from_name));
-    seq!(_: Caseless("from"), _: generic_args, _: ws, from_image, from_as).map(|r| {
+    let mut from_as = opt(seq!(_: ws(1..), _: Caseless("as"), _: ws(1..), from_name));
+    seq!(_: Caseless("from"), _: generic_args, _: ws(1..), from_image, from_as).map(|r| {
         DockerFileInstruction::From {
             src: r.0,
             name: r.1.map(|s| s.0)
@@ -48,46 +49,60 @@ fn from_instruction<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> M
 }
 
 fn from_image<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<String, E> {
-    take_until_ws.verify_map(|s| String::from_utf8(s.to_owned()).ok()).parse_next(input)
+    trace("from_image", take_until_ws.verify_map(|s| String::from_utf8(s.to_owned()).ok())).parse_next(input)
 }
 
 fn from_name<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<String, E> {
-    take_until_ws.verify_map(|s| String::from_utf8(s.to_owned()).ok()).parse_next(input)
+    trace("from_name", take_until_ws.verify_map(|s| String::from_utf8(s.to_owned()).ok())).parse_next(input)
 }
 
 fn generic_args<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<(), E> {
-    let generic_arg = (ws, "--", take_until_ws);
-    repeat(0.., generic_arg).map(|_: Vec<_>| ()).parse_next(input)
+    let generic_arg = (ws(1..), "--", take_until_ws);
+    trace("generic_args", repeat(0.., generic_arg).map(|_: Vec<_>| ())).parse_next(input)
 }
 
 fn other_instruction<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<DockerFileInstruction, E> {
     // TODO: Make sure we handle heredoc, backslash, etc, correctly
-    (take_until_end1, comment_line_end).map(|r| {
+    trace("other_instruction", (take_until_end1, comment_line_end).map(|r| {
         DockerFileInstruction::Other(String::from_utf8_lossy(r.0).into_owned())
-    }).parse_next(input)
+    })).parse_next(input)
 }
 
 fn strange_line<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<DockerFileInstruction, E> {
     // We end up here if we can't understand this line
-    (take_until_end1, newline).map(|r| {
+    trace("strange_line", (take_until_end1, newline).map(|r| {
         DockerFileInstruction::Strange(String::from_utf8_lossy(r.0).into_owned())
-    }).parse_next(input)
+    })).parse_next(input)
 }
 
 fn comment_line_end<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<(), E> {
-    (ws, opt((b"#", till_line_ending)), newline).value(()).parse_next(input)
+    let ending = alt((newline, eof.value(0 as char)));
+    trace("comment_line_end", (
+        ws(0..),
+        opt((b"#", till_line_ending)),
+        ending
+    )).value(()).parse_next(input)
 }
 
-fn ws<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<&'i [u8], E> {
-    take_while(0.., b" \t").parse_next(input)
+fn ws<'i, E>(range: std::ops::RangeFrom<usize>) -> impl Parser<Stream<'i>, StreamSlice<'i>, E>
+where
+    E: ParserError<Stream<'i>>
+{
+    take_while(range, b" \t")
 }
 
 fn take_until_end1<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<&'i [u8], E> {
-    take_till(1.., b"\r\n#").parse_next(input)
+    alt((
+        take_till(0.., b"\r\n#"),
+        terminated(rest, eof)
+    )).parse_next(input)
 }
 
 fn take_until_ws<'i, E: ParserError<Stream<'i>>>(input: &mut Stream<'i>) -> ModalResult<&'i [u8], E> {
-    take_till(0.., b" \t\r\n").parse_next(input)
+    trace("take_until_ws", alt((
+        take_till(1.., b" \t\r\n"),
+        terminated(rest, eof)
+    ))).parse_next(input)
 }
 
 impl DockerFileParser {
@@ -97,13 +112,19 @@ impl DockerFileParser {
         }
     }
 
-    pub fn push(&mut self, data: &[u8]) -> Vec<DockerFileInstruction> {
+    pub fn push(&mut self, data: &[u8], eof: bool) -> Vec<DockerFileInstruction> {
         let mut results = Vec::new();
         self.buffer.extend(data);
         
-        loop {
-            let buffer = self.buffer.make_contiguous();
-            let mut input = Stream::new(buffer);
+        let buffer = self.buffer.make_contiguous();
+        let mut input = Stream::new(buffer);
+        let mut consumed = 0;
+
+        if eof {
+            let _ = input.complete();
+        }
+
+        while !input.is_empty() {
             let start = input.checkpoint();
 
             match dockerfile_instructions::<ContextError>.parse_next(&mut input) {
@@ -111,8 +132,11 @@ impl DockerFileParser {
                     if let Some(value) = value {
                         results.push(value);
                     }
-                    let consumed = input.offset_from(&start);
-                    self.buffer.consume(consumed);
+                    consumed += input.offset_from(&start);
+
+                    if eof && input.is_empty() {
+                        break;
+                    }
                 },
                 Err(ErrMode::Incomplete(_)) => {
                     break;
@@ -123,6 +147,69 @@ impl DockerFileParser {
             }
         }
 
+        self.buffer.consume(consumed);
+
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct FromInstr {
+        src: String,
+        name: Option<String>,
+    }
+
+    fn docker_filter_from(contents: &str) -> Vec<FromInstr> {
+        let mut parser = DockerFileParser::new();
+        let items = parser.push(contents.as_bytes(), true);
+        items.into_iter().filter_map(|i|
+            match i {
+                DockerFileInstruction::From { src, name } => Some(FromInstr { src, name}),
+                _ => None,
+            }
+        ).collect()
+    }
+
+    #[test]
+    fn test_simple() {
+        assert!(docker_filter_from("").is_empty());
+        assert_eq!(docker_filter_from("FROM src\n"), vec![
+            FromInstr { src: "src".into(), name: None }
+        ]);
+        assert_eq!(docker_filter_from("FROM src"), vec![
+            FromInstr { src: "src".into(), name: None }
+        ]);
+    }
+
+    #[test]
+    fn test_as() {
+        assert_eq!(docker_filter_from("FROM src:t AS target\nRUN a\nFROM target AS target2\n"), vec![
+            FromInstr { src: "src:t".into(), name: Some("target".into()) },
+            FromInstr { src: "target".into(), name: Some("target2".into()) }
+        ]);
+    }
+
+    #[test]
+    fn test_partial() {
+        let mut parser = DockerFileParser::new();
+        let items = parser.push(b"FROM src AS target\n", false);
+        assert_eq!(items[0], DockerFileInstruction::From {
+            src: "src".into(),
+            name: Some("target".into()),
+        });
+    }
+
+    #[test]
+    fn test_partial2() {
+        let mut parser = DockerFileParser::new();
+        let items = parser.push(b"FROM src AS target\nRUN bit", false);
+        assert_eq!(items[0], DockerFileInstruction::From {
+            src: "src".into(),
+            name: Some("target".into()),
+        });
     }
 }

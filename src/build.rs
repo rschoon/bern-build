@@ -168,7 +168,18 @@ where
     W: io::Write
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        for item in self.parser.push(buf) {
+        self.handle(buf, false);
+        self.writer.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+impl<W: io::Write> RuntimeWriteLayer<W> {
+    fn handle(&mut self, buf: &[u8], eof: bool) {
+        for item in self.parser.push(buf, eof) {
             if let DockerFileInstruction::From { src: _, name } = item {
                 let mut lock = self.runtime.0.lock().unwrap();
                 lock.target = Some(Arc::new(Target {
@@ -176,11 +187,11 @@ where
                 }))
             }
         }
-        self.writer.write(buf)
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        self.writer.flush()
+    fn finish(&mut self) {
+        self.handle(b"", true);
+        let _ = self.writer.flush();
     }
 }
 
@@ -247,13 +258,15 @@ impl BernBuild {
     where
         W: std::io::Write
     {
-        let rt_writer = RuntimeWriteLayer {
+        let mut rt_writer = RuntimeWriteLayer {
             runtime: self.runtime.clone(),
             parser: DockerFileParser::new(),
             writer,
         };
 
-        self.jenv.render_to(&self.config.file, rt_writer)?;
+        self.jenv.render_to(&self.config.file, &mut rt_writer)?;
+
+        rt_writer.finish();
 
         Ok(())
     }
