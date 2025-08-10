@@ -1,0 +1,4 @@
+
+[[run]]
+args = ["--output", "output"]
+verify_files = { "output/hello.txt".content = "input" }

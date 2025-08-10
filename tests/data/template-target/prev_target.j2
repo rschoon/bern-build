@@ -1,0 +1,8 @@
+
+FROM docker.io/library/debian:stable AS input
+FROM docker.io/library/alpine:latest AS input2
+RUN echo -n {{bern.target("input").src}} > /src.txt
+
+FROM scratch
+COPY --from=input2 /src.txt /
+

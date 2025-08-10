@@ -2,7 +2,7 @@
 use std::{collections::HashMap, ffi::OsStr, fmt::{self, Display as _}, fs, io::{BufReader, Read, Write}, path::Path, sync::Arc};
 
 use anyhow::Context as _;
-use minijinja::{value::Object, Value};
+use minijinja::{value::{DynObject, Object}, Value};
 
 #[derive(Debug)]
 pub struct Environment {
@@ -95,6 +95,40 @@ impl Object for DateTime {
         Self: Sized + 'static,
     {
         self.0.fmt(f)
+    }
+}
+
+pub trait IntoValue {
+    fn into_value(self) -> Result<Value, minijinja::Error>;
+}
+
+impl<T: IntoValue> IntoValue for Option<T> {
+    fn into_value(self) -> Result<Value, minijinja::Error> {
+        match self {
+            Some(v) => v.into_value(),
+            None => Ok(None::<()>.into())
+        }
+    }
+}
+
+impl<T: IntoValue> IntoValue for Result<T, anyhow::Error> {
+    fn into_value(self) -> Result<Value, minijinja::Error> {
+        match self {
+            Ok(v) => v.into_value(),
+            Err(e) => Err(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
+        }
+    }
+}
+
+impl<T: Object + 'static> IntoValue for Arc<T> {
+    fn into_value(self) -> Result<Value, minijinja::Error> {
+        Ok(DynObject::new(self).into())
+    }
+}
+
+impl IntoValue for () {
+    fn into_value(self) -> Result<Value, minijinja::Error> {
+        Ok(().into())
     }
 }
 

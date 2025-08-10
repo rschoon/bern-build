@@ -1,0 +1,7 @@
+
+FROM docker.io/library/alpine:latest AS input
+RUN echo -n {{bern.target().name}} > /hello.txt
+
+FROM scratch
+COPY --from=input /hello.txt /
+

@@ -1,0 +1,5 @@
+
+[[run]]
+args = ["--output", "output"]
+verify_files = { "output/src.txt".content = "docker.io/library/debian:stable" }
+

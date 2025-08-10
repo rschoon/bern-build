@@ -3,7 +3,7 @@ use std::{collections::HashMap, ffi::OsString, fmt, fs, io::{self, BufRead, BufW
 use anyhow::{anyhow, bail, Context as _};
 use minijinja::{value::Object, Value};
 
-use crate::{dockerfile::{DockerFileInstruction, DockerFileParser}, template};
+use crate::{dockerfile::{DockerFileInstruction, DockerFileParser}, template::{self, IntoValue as _}};
 
 #[derive(Default, Debug, Clone)]
 pub struct BernConfig {
@@ -19,6 +19,7 @@ pub struct BernConfig {
 
 #[derive(Debug, Default)]
 struct RuntimeInner {
+    targets: HashMap<String, Arc<Target>>,
     target: Option<Arc<Target>>,
     config: Arc<BernConfig>,
     output: Option<PathBuf>,
@@ -68,6 +69,14 @@ impl Runtime {
             anyhow!("Current version {current} does not match requested {req}")
         )
     }
+
+    fn target(&self, name: &str) -> Option<Arc<Target>> {
+        Some(self.0.lock().unwrap().targets.get(name)?.clone())
+    }
+
+    fn current_target(&self) -> Option<Arc<Target>> {
+        self.0.lock().unwrap().target.clone()
+    }
 }
 
 impl Object for Runtime {
@@ -81,13 +90,19 @@ impl Object for Runtime {
         let method = if method == "set_output" {
             Value::from_function(move |s: Option<&str>| this.set_output(s.map(PathBuf::from)))
         } else if method == "set_build_arg" {
-            Value::from_function(move |k: &str, v: &str| mj_res(this.set_build_arg(k, v)))
+            Value::from_function(move |k: &str, v: &str| this.set_build_arg(k, v).into_value())
+        } else if method == "target" {
+            if args.is_empty() {
+                Value::from_function(move || this.current_target().into_value())
+            } else {
+                Value::from_function(move |n: &str| this.target(n).into_value())
+            }
         } else if method == "build_arg" {
             Value::from_function(move |k: &str| this.build_arg(k))
         } else if method == "add_docker_tag" {
-            Value::from_function(move |t: &str| mj_res(this.add_docker_tag(t)))
+            Value::from_function(move |t: &str| this.add_docker_tag(t).into_value())
         } else if method == "version_require" {
-            Value::from_function(move |v: &str| mj_res(this.version_require(v)))
+            Value::from_function(move |v: &str| this.version_require(v).into_value())
         } else {
             return Err(minijinja::Error::from(minijinja::ErrorKind::UnknownMethod))
         };
@@ -98,6 +113,7 @@ impl Object for Runtime {
 
 #[derive(Debug)]
 struct Target {
+    src: String,
     name: Option<String>,
 }
 
@@ -107,20 +123,20 @@ impl Object for Target {
             write!(f, "[{name}]")
         } else {
             f.write_str("[_]")
-        }
-        
+        }        
     }
 
     fn get_value(self: &Arc<Self>, key: &Value) -> Option<Value> {
         let key = key.as_str()?;
         if key == "name" {
             Some(Value::from_safe_string(self.name.clone()?))
+        } else if key == "src" {
+            Some(Value::from_safe_string(self.src.clone()))
         } else {
             None
         }
     }
 }
-
 
 #[derive(Debug)]
 struct CurrentTarget(Arc<Runtime>);
@@ -147,16 +163,6 @@ impl Object for CurrentTarget {
     }
 }
 
-fn mj_res<I>(result: anyhow::Result<I>) -> Result<Value, minijinja::Error>
-where 
-    I: Into<Value>
-{
-    match result {
-        Ok(v) => Ok(v.into()),
-        Err(e) => Err(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string()))
-    }
-}
-
 struct RuntimeWriteLayer<W> {
     runtime: Arc<Runtime>,
     parser: DockerFileParser,
@@ -180,11 +186,16 @@ where
 impl<W: io::Write> RuntimeWriteLayer<W> {
     fn handle(&mut self, buf: &[u8], eof: bool) {
         for item in self.parser.push(buf, eof) {
-            if let DockerFileInstruction::From { src: _, name } = item {
+            if let DockerFileInstruction::From { src, name } = item {
                 let mut lock = self.runtime.0.lock().unwrap();
-                lock.target = Some(Arc::new(Target {
-                    name
-                }))
+                let target = Arc::new(Target {
+                    src,
+                    name: name.clone()
+                });
+                if let Some(name) = name {
+                    lock.targets.insert(name, target.clone());
+                }
+                lock.target = Some(target);
             }
         }
     }
