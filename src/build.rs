@@ -335,10 +335,8 @@ impl BernBuild {
                 command.arg("--target").arg(name);
             }
 
-            if target.last {
-                if let Some(docker_tag) = first_docker_tag.as_deref() {
-                    command.arg("-t").arg(docker_tag);
-                }
+            if target.last && let Some(docker_tag) = first_docker_tag.as_deref() {
+                command.arg("-t").arg(docker_tag);
             }
 
             command.arg(&self.config.context_root);
