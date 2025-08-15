@@ -1,0 +1,12 @@
+
+FROM docker.io/library/alpine:latest AS input
+RUN <<EOT
+    echo -n '
+FROM meow AS cat
+' > /hello.txt
+    echo -n {{target.name}} >> /hello.txt
+EOT
+
+FROM scratch
+COPY --from=input /hello.txt /
+
